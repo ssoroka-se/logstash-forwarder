@@ -19,7 +19,7 @@ shared_examples_for "logstash-forwarder" do
   let(:random_value) { (rand(30)+1).times.map { (rand(26) + 97).chr }.join }
   let(:port) { rand(50000) + 1024 }
 
-  let(:server) do 
+  let(:server) do
     Lumberjack::Server.new(:ssl_certificate => ssl_certificate, :ssl_key => ssl_key, :port => port)
   end
 
@@ -76,10 +76,12 @@ shared_examples_for "logstash-forwarder" do
     # TODO(sissel): Make sure this doesn't take forever, do a timeout.
     count = 0
     events = []
-    connection = server.accept
-    connection.run do |event|
+    server.run do |event|
       events << event
-      connection.close if events.length == lines.length
+      if events.length == lines.length
+        server.stop
+        raise EOFError.new("Force the connection out of the read loop")
+      end
     end
 
     expect(events.count).to(eq(lines.length))
@@ -97,10 +99,10 @@ describe "operating" do
   context "when compiled from source" do
     let(:lsf) do
       # Start the process, return the pid
-      IO.popen(["./logstash-forwarder", "-config", config_file, "-quiet"])
+      IO.popen(["./logstash-forwarder", "-config", config_file, "-quiet", "-from-beginning=true"])
     end
     let(:host) { "localhost" }
-    it_behaves_like "logstash-forwarder" 
+    it_behaves_like "logstash-forwarder"
   end
 
   if false
@@ -113,7 +115,7 @@ describe "operating" do
       end
 
       # Have to try repeatedly here because the network configuration of a docker container isn't available immediately.
-      let(:host) do 
+      let(:host) do
         lsf
         ip = nil
         10.times do
@@ -129,13 +131,13 @@ describe "operating" do
       it_behaves_like "logstash-forwarder" do
         before do
           if !File.exist?("logstash-forwarder")
-            system("make logstash-forwarder #{redirect}") 
+            system("make logstash-forwarder #{redirect}")
             expect($?).to(be_success)
           end
           system("make deb #{redirect}")
           expect($?).to(be_success)
           expect(File).to(be_exist(deb))
-          
+
           FileUtils.cp(deb, workdir)
           lsf.write("dpkg -i #{workdir}/#{File.basename(deb)}\n")
           system("docker inspect #{container_name}")
